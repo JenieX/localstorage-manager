@@ -46,19 +46,105 @@ function getTab(callback) {
 }
 
 function executeScript(msg, callback) {
-    getTab(function(tabId) {
-        var exec = chrome.tabs.executeScript;
 
-        exec(tabId, { code: 'var msg = ' + JSON.stringify(msg) }, function() {
+    function injectFunction(msg) {
+        function getStorage() {
+            var obj = {};
+
+            if (storage === undefined) {
+                return;
+            }
+
+            var specialKeys = [
+                'length', 'key', 'getItem',
+                'setItem', 'removeItem', 'clear'
+            ];
+
+            for (var i in storage) {
+                if (storage.hasOwnProperty(i)) {
+                    obj[i] = storage.getItem(i);
+                }
+            }
+
+            var item;
+            for (var i in specialKeys) {
+                item = storage.getItem(specialKeys[i]);
+                if (item !== null) {
+                    obj[specialKeys[i]] = item;
+                }
+            }
+
+            return obj;
+        }
+
+        var storage = msg.type === 'L' ? localStorage : sessionStorage;
+        var result;
+
+        switch (msg.what) {
+
+            case 'get':
+                result = getStorage();
+                console.table(result);
+                break;
+
+            case 'remove':
+                storage.removeItem(msg.key);
+                break;
+
+            case 'set':
+
+                // changing key?
+                if (msg.oldKey !== undefined)  {
+                    storage.removeItem(msg.oldKey);
+                }
+
+                storage.setItem(msg.key, msg.value);
+                break;
+
+            case 'clear':
+                storage.clear();
+                break;
+
+            case 'export':
+                result = JSON.stringify(getStorage(), null, 4);
+                break;
+
+            case 'import':
+                try {
+                    var obj = JSON.parse(msg.json);
+                    for (var i in obj) {
+                        if (obj.hasOwnProperty(i)) {
+                            storage.setItem(i, obj[i]);
+                        }
+                    }
+                }
+                catch(e) {}
+                break;
+        }
+
+        return result;
+    }
+
+
+    getTab(function(tabId) {
+        var opt = {
+            target: {
+                tabId: tabId
+            },
+            func: injectFunction,
+            args: [msg]
+        };
+
+        chrome.scripting.executeScript(opt, function(injectionResults) {
             if (chrome.runtime.lastError) {
                 console.log(chrome.runtime.lastError.message);
                 callback && callback(undefined);
                 return;
             }
 
-            exec(tabId, { file: 'inject.js' }, function(response) {
-                callback && callback(response[0]);
-            });
+            var result = injectionResults[0].result;
+
+            callback && callback(result);
         });
     });
 }
@@ -307,7 +393,7 @@ $('#download').click(function(e) {
                 a.style.display = 'none';
                 doc.body.appendChild(a);
                 a.click();
-                document.body.removeChild(a);
+                doc.body.removeChild(a);
             };
             document.body.appendChild(iframe);
 
